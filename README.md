@@ -1,4 +1,4 @@
-# image_to_avif
+# image converter
 
 Bulk-convert images (jpg / png / webp / bmp / tiff / gif) to AVIF, WebP, JPEG or PNG,
 with a friendly interactive CLI.
