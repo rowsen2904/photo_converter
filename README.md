@@ -6,7 +6,8 @@ with a friendly interactive CLI.
 ## Setup (once)
 
 ```bash
-cd tools/image_to_avif
+git clone https://github.com/rowsen2904/photo_converter/
+cd photo_converter
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
