@@ -1,6 +1,7 @@
 # image_to_avif
 
-Bulk-convert images (jpg / png / webp / bmp / tiff / gif) to AVIF.
+Bulk-convert images (jpg / png / webp / bmp / tiff / gif) to AVIF, WebP, JPEG or PNG,
+with a friendly interactive CLI.
 
 ## Setup (once)
 
@@ -20,18 +21,26 @@ then run:
 python convert.py
 ```
 
-Results appear under `output/` with the same folder structure and `.avif`
-extensions.
+You'll be prompted to pick the output format (AVIF, WebP, JPEG, PNG), then a
+progress bar tracks the conversion and a results table shows the size savings
+per file.
 
-Optional flags:
+Results appear under `output/` with the same folder structure and the
+matching extension for the format you chose.
+
+Optional flags (skip the prompt by passing `--format` or `--yes`):
 
 ```bash
 python convert.py \
   --input path/to/src \
   --output path/to/dst \
+  --format webp \
   --quality 55 \
-  --speed 6
+  --speed 6 \
+  --yes
 ```
 
-- `--quality` 0-100 (default 60). Lower = smaller file, more artifacts.
-- `--speed` 0-10 (default 6). Higher = faster encode, slightly larger file.
+- `--format` / `-f`: `avif`, `webp`, `jpeg`, or `png` (default: asked interactively).
+- `--quality` / `-q`: 0-100, where the format supports it (default 60). Lower = smaller file, more artifacts. Ignored for `png`.
+- `--speed` / `-s`: AVIF encoder speed 0-10, higher = faster (default 6). Only applies to `avif`.
+- `--yes` / `-y`: skip the interactive format prompt and use the default (`avif`) or whatever `--format` was given.
