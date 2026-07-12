@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bulk-convert images from an input folder to AVIF in an output folder."""
+"""Bulk-convert images from an input folder to AVIF/WebP/JPEG/PNG."""
 
 from __future__ import annotations
 
@@ -10,7 +10,14 @@ from pathlib import Path
 from PIL import Image
 import pillow_avif  # noqa: F401  # side effect: registers AVIF plugin
 
-SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".gif", ".avif"}
+
+FORMATS: dict[str, dict] = {
+    "avif": {"pillow": "AVIF", "ext": ".avif", "supports_quality": True, "supports_speed": True},
+    "webp": {"pillow": "WEBP", "ext": ".webp", "supports_quality": True, "supports_speed": False},
+    "jpeg": {"pillow": "JPEG", "ext": ".jpg", "supports_quality": True, "supports_speed": False},
+    "png": {"pillow": "PNG", "ext": ".png", "supports_quality": False, "supports_speed": False},
+}
 
 
 def iter_images(root: Path) -> list[Path]:
@@ -21,17 +28,27 @@ def iter_images(root: Path) -> list[Path]:
     )
 
 
-def convert(src: Path, dst: Path, quality: int, speed: int) -> None:
+def convert(src: Path, dst: Path, fmt: str, quality: int, speed: int) -> None:
+    spec = FORMATS[fmt]
     dst.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(src) as im:
-        if im.mode not in ("RGB", "RGBA"):
+        save_kwargs = {}
+        if spec["supports_quality"]:
+            save_kwargs["quality"] = quality
+        if spec["supports_speed"]:
+            save_kwargs["speed"] = speed
+
+        if spec["pillow"] == "JPEG" and im.mode in ("RGBA", "P"):
+            im = im.convert("RGB")
+        elif spec["pillow"] == "AVIF" and im.mode not in ("RGB", "RGBA"):
             im = im.convert("RGBA" if "A" in im.getbands() else "RGB")
-        im.save(dst, format="AVIF", quality=quality, speed=speed)
+
+        im.save(dst, format=spec["pillow"], **save_kwargs)
 
 
 def parse_args() -> argparse.Namespace:
     here = Path(__file__).resolve().parent
-    parser = argparse.ArgumentParser(description="Convert images to AVIF.")
+    parser = argparse.ArgumentParser(description="Convert images to AVIF, WebP, JPEG or PNG.")
     parser.add_argument(
         "--input", "-i",
         type=Path,
@@ -45,10 +62,16 @@ def parse_args() -> argparse.Namespace:
         help="Destination folder (default: ./output)",
     )
     parser.add_argument(
+        "--format", "-f",
+        choices=list(FORMATS),
+        default="avif",
+        help="Output format (default: avif)",
+    )
+    parser.add_argument(
         "--quality", "-q",
         type=int,
         default=60,
-        help="AVIF quality 0-100 (default: 60)",
+        help="Encoder quality 0-100, where supported (default: 60)",
     )
     parser.add_argument(
         "--speed", "-s",
@@ -73,12 +96,13 @@ def main() -> int:
         print(f"no images found in {src_root}")
         return 0
 
+    ext = FORMATS[args.format]["ext"]
     failures = 0
     for src in files:
-        rel = src.relative_to(src_root).with_suffix(".avif")
+        rel = src.relative_to(src_root).with_suffix(ext)
         dst = dst_root / rel
         try:
-            convert(src, dst, args.quality, args.speed)
+            convert(src, dst, args.format, args.quality, args.speed)
             saved = dst.stat().st_size
             original = src.stat().st_size
             ratio = saved / original * 100 if original else 0
