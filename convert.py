@@ -5,10 +5,19 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 import pillow_avif  # noqa: F401  # side effect: registers AVIF plugin
+
+try:
+    from rich.console import Console
+    from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
+    from rich.table import Table
+    HAS_RICH = True
+except ImportError:  # pragma: no cover - degrade gracefully without rich
+    HAS_RICH = False
 
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".gif", ".avif"}
 
@@ -18,6 +27,8 @@ FORMATS: dict[str, dict] = {
     "jpeg": {"pillow": "JPEG", "ext": ".jpg", "supports_quality": True, "supports_speed": False},
     "png": {"pillow": "PNG", "ext": ".png", "supports_quality": False, "supports_speed": False},
 }
+
+console = Console() if HAS_RICH else None
 
 
 def iter_images(root: Path) -> list[Path]:
@@ -82,6 +93,78 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+@dataclass
+class Result:
+    rel: Path
+    original: int
+    saved: int
+    ok: bool
+    error: str = ""
+
+
+def run_conversion(files: list[Path], src_root: Path, dst_root: Path, fmt: str, quality: int, speed: int) -> list[Result]:
+    results: list[Result] = []
+    ext = FORMATS[fmt]["ext"]
+
+    if HAS_RICH:
+        progress = Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            console=console,
+        )
+        with progress:
+            task = progress.add_task("converting", total=len(files))
+            for src in files:
+                results.append(_convert_one(src, src_root, dst_root, fmt, ext, quality, speed))
+                progress.advance(task)
+    else:
+        for src in files:
+            results.append(_convert_one(src, src_root, dst_root, fmt, ext, quality, speed))
+            print(f"{results[-1].rel} ... {'ok' if results[-1].ok else 'FAILED'}")
+
+    return results
+
+
+def _convert_one(src: Path, src_root: Path, dst_root: Path, fmt: str, ext: str, quality: int, speed: int) -> Result:
+    rel = src.relative_to(src_root).with_suffix(ext)
+    dst = dst_root / rel
+    try:
+        convert(src, dst, fmt, quality, speed)
+        return Result(rel, src.stat().st_size, dst.stat().st_size, ok=True)
+    except Exception as exc:  # noqa: BLE001
+        return Result(rel, src.stat().st_size, 0, ok=False, error=str(exc))
+
+
+def print_summary(results: list[Result], dst_root: Path) -> None:
+    failures = [r for r in results if not r.ok]
+    successes = [r for r in results if r.ok]
+
+    if HAS_RICH:
+        table = Table(title="Conversion results")
+        table.add_column("File")
+        table.add_column("Original", justify="right")
+        table.add_column("Saved", justify="right")
+        table.add_column("Ratio", justify="right")
+        for r in successes:
+            ratio = r.saved / r.original * 100 if r.original else 0
+            table.add_row(str(r.rel), f"{r.original:,} B", f"{r.saved:,} B", f"{ratio:.0f}%")
+        for r in failures:
+            table.add_row(str(r.rel), "-", "-", f"[red]failed: {r.error}[/red]")
+        console.print(table)
+        console.print(
+            f"\n[bold green]done:[/bold green] {len(successes)}/{len(results)} converted → {dst_root}"
+        )
+    else:
+        for r in successes:
+            ratio = r.saved / r.original * 100 if r.original else 0
+            print(f"{r.rel}  ({r.original:,} → {r.saved:,} B, {ratio:.0f}%)")
+        for r in failures:
+            print(f"failed {r.rel}: {r.error}", file=sys.stderr)
+        print(f"\ndone: {len(successes)}/{len(results)} converted → {dst_root}")
+
+
 def main() -> int:
     args = parse_args()
     src_root: Path = args.input.resolve()
@@ -96,23 +179,10 @@ def main() -> int:
         print(f"no images found in {src_root}")
         return 0
 
-    ext = FORMATS[args.format]["ext"]
-    failures = 0
-    for src in files:
-        rel = src.relative_to(src_root).with_suffix(ext)
-        dst = dst_root / rel
-        try:
-            convert(src, dst, args.format, args.quality, args.speed)
-            saved = dst.stat().st_size
-            original = src.stat().st_size
-            ratio = saved / original * 100 if original else 0
-            print(f"{rel}  ({original:,} → {saved:,} B, {ratio:.0f}%)")
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            print(f"failed {rel}: {exc}", file=sys.stderr)
+    results = run_conversion(files, src_root, dst_root, args.format, args.quality, args.speed)
+    print_summary(results, dst_root)
 
-    print(f"\ndone: {len(files) - failures}/{len(files)} converted → {dst_root}")
-    return 1 if failures else 0
+    return 1 if any(not r.ok for r in results) else 0
 
 
 if __name__ == "__main__":
