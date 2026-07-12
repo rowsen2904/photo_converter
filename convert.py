@@ -15,6 +15,7 @@ try:
     from rich.console import Console
     from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
     from rich.table import Table
+    from rich.prompt import IntPrompt
     HAS_RICH = True
 except ImportError:  # pragma: no cover - degrade gracefully without rich
     HAS_RICH = False
@@ -29,6 +30,29 @@ FORMATS: dict[str, dict] = {
 }
 
 console = Console() if HAS_RICH else None
+
+
+def pick_format_interactively() -> str:
+    options = list(FORMATS)
+    if HAS_RICH:
+        console.print("\n[bold cyan]Choose an output format:[/bold cyan]")
+        for i, name in enumerate(options, start=1):
+            console.print(f"  [{i}] {name}")
+        idx = IntPrompt.ask(
+            "Format",
+            choices=[str(i) for i in range(1, len(options) + 1)],
+            default=1,
+        )
+        return options[idx - 1]
+
+    print("\nChoose an output format:")
+    for i, name in enumerate(options, start=1):
+        print(f"  [{i}] {name}")
+    while True:
+        raw = input(f"Format [1-{len(options)}] (default 1): ").strip() or "1"
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return options[int(raw) - 1]
+        print("invalid choice, try again")
 
 
 def iter_images(root: Path) -> list[Path]:
@@ -75,8 +99,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--format", "-f",
         choices=list(FORMATS),
-        default="avif",
-        help="Output format (default: avif)",
+        default=None,
+        help="Output format (default: ask interactively)",
     )
     parser.add_argument(
         "--quality", "-q",
@@ -89,6 +113,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=6,
         help="AVIF encoder speed 0-10, higher = faster (default: 6)",
+    )
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Skip interactive prompts and use defaults/flags as given",
     )
     return parser.parse_args()
 
@@ -179,7 +208,13 @@ def main() -> int:
         print(f"no images found in {src_root}")
         return 0
 
-    results = run_conversion(files, src_root, dst_root, args.format, args.quality, args.speed)
+    fmt = args.format
+    if fmt is None and not args.yes:
+        fmt = pick_format_interactively()
+    elif fmt is None:
+        fmt = "avif"
+
+    results = run_conversion(files, src_root, dst_root, fmt, args.quality, args.speed)
     print_summary(results, dst_root)
 
     return 1 if any(not r.ok for r in results) else 0
